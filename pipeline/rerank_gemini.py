@@ -27,6 +27,9 @@ RUN ON YOUR LAPTOP with a GEMINI_API_KEY environment variable set
 
 import os
 import re
+from dotenv import load_dotenv
+
+load_dotenv()
 
 RERANK_PROMPT = """Score how relevant this document chunk is to the query, on a scale of 0.0 to 1.0.
 Output ONLY the number, nothing else.

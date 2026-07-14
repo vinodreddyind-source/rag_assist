@@ -15,6 +15,9 @@ generate. No grading, no retry loop, no LangGraph -- that comes in Phase 2.
 
 import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # reads .env into os.environ -- without this, .env does nothing
 
 GEN_BACKEND = os.environ.get("GEN_BACKEND", "gemini")  # default: RAM-friendly
 

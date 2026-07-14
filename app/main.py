@@ -11,23 +11,34 @@ import os
 import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pipeline"))
 
+from dotenv import load_dotenv
+load_dotenv()  # must happen before any os.environ.get() below, including RERANK_BACKEND
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from retrieval import load_children, HybridRetriever
+from retrieval_qdrant import QdrantHybridRetriever
 from query_processing import expand_acronyms, route_product
-from rerank import rerank
 from generate import generate_answer
 from monitoring import monitor
 from rate_limit import rate_limiter
 from guardrails import redact_pii, check_injection
 
+# Matches GEN_BACKEND's pattern: default to Gemini so an 8GB laptop never
+# needs to download the local cross-encoder alongside the embedding model.
+RERANK_BACKEND = os.environ.get("RERANK_BACKEND", "gemini")
+
+if RERANK_BACKEND == "gemini":
+    from rerank_gemini import rerank_with_gemini as rerank
+else:
+    from rerank import rerank
+
 app = FastAPI(title="Insurance Docs RAG (Advanced/Linear)")
 
-# Loaded once at startup, not per-request
-_children = load_children()
-_retriever = HybridRetriever(_children)
+# Built once at startup: loads real embeddings from data/chunk_vectors.npy
+# (run pipeline/embed_pipeline.py first if this raises FileNotFoundError)
+_retriever = QdrantHybridRetriever()
 
 
 @app.middleware("http")
@@ -87,7 +98,7 @@ async def query_endpoint(payload: QueryRequest):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "chunks_loaded": len(_children)}
+    return {"status": "ok", "chunks_loaded": len(_retriever.children)}
 
 
 @app.get("/metrics")
