@@ -23,7 +23,6 @@ GEN_BACKEND = os.environ.get("GEN_BACKEND", "gemini")  # default: RAM-friendly
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.2:3b"  # smaller than 8b -- if you do use Ollama on 8GB, this is the one to pull
-GEMINI_MODEL = "gemini-2.5-flash"
 
 GENERATION_PROMPT = """You are a helpful assistant answering questions using ONLY the context below.
 If the context doesn't contain enough information, say so clearly. Cite which
@@ -56,13 +55,18 @@ def _generate_ollama(prompt: str) -> str:
 
 
 def _generate_gemini(prompt: str) -> str:
-    import google.generativeai as genai
+    from google import genai
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY -- see .env.example")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
-    response = model.generate_content(prompt)
+    client = genai.Client(api_key=api_key)
+    # "gemini-flash-latest" auto-points at the current GA flash model, so
+    # this stops going stale every time Google renames/retires a version --
+    # gemini-2.5-flash itself was retired for new users mid-2026, which is
+    # exactly the failure mode this alias avoids. Pin to an explicit
+    # version instead (e.g. "gemini-3.5-flash") if you need reproducibility
+    # for a specific eval run.
+    response = client.models.generate_content(model="gemini-flash-latest", contents=prompt)
     return response.text
 
 

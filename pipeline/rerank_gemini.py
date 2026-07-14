@@ -42,20 +42,19 @@ Relevance score (0.0-1.0):"""
 
 
 def rerank_with_gemini(query: str, candidates: list[dict], top_n: int = 5,
-                        model: str = "gemini-2.5-flash") -> list[dict]:
-    import google.generativeai as genai
+                        model: str = "gemini-flash-latest") -> list[dict]:
+    from google import genai
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY (free, from Google AI Studio) before running this.")
 
-    genai.configure(api_key=api_key)
-    llm = genai.GenerativeModel(model)
+    client = genai.Client(api_key=api_key)
 
     scored = []
     for c in candidates:
         prompt = RERANK_PROMPT.format(query=query, document=c["text"])
-        response = llm.generate_content(prompt)
+        response = client.models.generate_content(model=model, contents=prompt)
         match = re.search(r"[\d.]+", response.text.strip())
         score = float(match.group()) if match else 0.0
         scored.append((c, score))
