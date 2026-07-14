@@ -25,6 +25,7 @@ filtered to $0 pricing before assuming a specific model ID still works.
 import os
 import requests
 from dotenv import load_dotenv
+from retry import retry_with_backoff, is_retryable_openrouter_error
 
 load_dotenv()
 
@@ -53,6 +54,22 @@ def _call_openrouter(prompt: str, model: str = DEFAULT_MODEL,
         json=body,
         timeout=30,
     )
+    if response.status_code == 429:
+        # Surface the actual reason instead of a bare HTTPError -- OpenRouter's
+        # 429 body/headers distinguish "wait a few seconds" (per-minute cap)
+        # from "come back tomorrow" (daily cap), and short retries only make
+        # sense for the former. Without this, a daily-cap 429 looks identical
+        # to a transient one and just wastes retry attempts against a limit
+        # that won't clear for hours.
+        reset_header = response.headers.get("X-RateLimit-Reset", "unknown")
+        try:
+            body_detail = response.json().get("error", {}).get("message", response.text[:200])
+        except Exception:
+            body_detail = response.text[:200]
+        raise requests.exceptions.HTTPError(
+            f"429 rate limited. Reset: {reset_header}. Detail: {body_detail}",
+            response=response,
+        )
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
@@ -61,25 +78,36 @@ def generate_openrouter(prompt: str) -> str:
     return _call_openrouter(prompt, fallback_models=FALLBACK_MODELS)
 
 
-def rerank_prompt(query: str, document: str) -> str:
-    return f"""Score how relevant this document chunk is to the query, on a scale of 0.0 to 1.0.
-Output ONLY the number, nothing else.
+def rerank_prompt(query: str, documents_block: str) -> str:
+    return f"""Score how relevant each numbered document is to the query, on a scale of 0.0 to 1.0.
+Return ONLY a JSON array of scores in the same order as the documents, e.g. [0.8, 0.2, 0.5]
+No other text, no explanation, just the JSON array.
 
 Query: {query}
 
-Document: {document}
+Documents:
+{documents_block}
 
-Relevance score (0.0-1.0):"""
+Scores (JSON array):"""
 
 
 def rerank_with_openrouter(query: str, candidates: list[dict], top_n: int = 5) -> list[dict]:
-    import re
-    scored = []
-    for c in candidates:
-        response_text = _call_openrouter(rerank_prompt(query, c["text"]), fallback_models=FALLBACK_MODELS)
-        match = re.search(r"[\d.]+", response_text.strip())
-        score = float(match.group()) if match else 0.0
-        scored.append((c, score))
+    """Listwise: ONE call scores all candidates, not one call per candidate.
+    Matters even more here than for Gemini -- OpenRouter's free tier is
+    50 requests/DAY, not per-minute, so a pointwise loop over 10 candidates
+    could burn a fifth of the whole day's budget on a single query."""
+    from rerank_gemini import _parse_score_array
+
+    documents_block = "\n".join(f"{i+1}. {c['text']}" for i, c in enumerate(candidates))
+    prompt = rerank_prompt(query, documents_block)
+
+    response_text = retry_with_backoff(
+        lambda: _call_openrouter(prompt, fallback_models=FALLBACK_MODELS),
+        retryable_check=is_retryable_openrouter_error,
+    )
+
+    scores = _parse_score_array(response_text, expected_len=len(candidates))
+    scored = list(zip(candidates, scores))
     scored.sort(key=lambda x: x[1], reverse=True)
     return [c for c, _score in scored[:top_n]]
 

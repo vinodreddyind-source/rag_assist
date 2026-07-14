@@ -24,6 +24,7 @@ from generate import generate_answer
 from monitoring import monitor
 from rate_limit import rate_limiter
 from guardrails import redact_pii, check_injection
+from semantic_cache_lite import DiskSemanticCache
 
 # Matches GEN_BACKEND's pattern: default to Gemini so an 8GB laptop never
 # needs to download the local cross-encoder alongside the embedding model.
@@ -41,6 +42,12 @@ app = FastAPI(title="Insurance Docs RAG (Advanced/Linear)")
 # Built once at startup: loads real embeddings from data/chunk_vectors.npy
 # (run pipeline/embed_pipeline.py first if this raises FileNotFoundError)
 _retriever = QdrantHybridRetriever()
+
+# Reuses _retriever's own embed function (lazy-loads the SAME
+# sentence-transformers instance on first real query) instead of loading a
+# second copy of the model just for caching -- that would double the ~1GB
+# RAM cost for no benefit.
+_cache = DiskSemanticCache(embed_fn=_retriever._embed_query, cache_dir="./cache_data")
 
 
 @app.middleware("http")
@@ -72,6 +79,7 @@ class QueryResponse(BaseModel):
     routed_product: str | None
     answer: str
     sources: list[str]
+    cache_hit: bool
 
 
 @app.post("/query", response_model=QueryResponse)
@@ -80,8 +88,26 @@ async def query_endpoint(payload: QueryRequest):
         raise HTTPException(status_code=400, detail="Request blocked: possible prompt injection")
 
     redacted_query = redact_pii(payload.query)
+
+    # Cache on the REDACTED query, not raw input -- so two queries differing
+    # only in a redacted name still hit the same entry, and no PII sits in
+    # the cache. Skips the entire retrieve->rerank->generate pipeline (and
+    # every external API call in it) on a hit.
+    cached_answer = _cache.lookup(redacted_query)
+    if cached_answer is not None:
+        expanded = expand_acronyms(redacted_query)
+        product = route_product(expanded)
+        return QueryResponse(
+            query=payload.query,
+            expanded_query=expanded,
+            routed_product=product,
+            answer=cached_answer,
+            sources=[],  # not re-derived on a cache hit -- the cached answer already has its sources embedded in the text
+            cache_hit=True,
+        )
+
     expanded = expand_acronyms(redacted_query)
-    product = route_product(redacted_query)
+    product = route_product(expanded)
 
     candidates = [c for c, _ in _retriever.hybrid_search(expanded, k=10)]
     top_chunks = rerank(redacted_query, candidates, top_n=5)
@@ -89,12 +115,15 @@ async def query_endpoint(payload: QueryRequest):
     answer = generate_answer(redacted_query, top_chunks)
     sources = list({f"{c['metadata']['product']}/{c['metadata']['section']}" for c in top_chunks})
 
+    _cache.store(redacted_query, answer)
+
     return QueryResponse(
         query=payload.query,
         expanded_query=expanded,
         routed_product=product,
         answer=answer,
         sources=sources,
+        cache_hit=False,
     )
 
 

@@ -43,9 +43,11 @@ async function ask() {
     const elapsed = ((performance.now() - start) / 1000).toFixed(2);
 
     document.getElementById('answer').textContent = data.answer;
-    document.getElementById('sources').textContent = "Sources: " + data.sources.join(", ");
+    document.getElementById('sources').textContent = data.sources.length
+      ? "Sources: " + data.sources.join(", ")
+      : "(served from cache -- sources not re-derived)";
     document.getElementById('meta').textContent =
-      `Expanded query: "${data.expanded_query}" | Routed to: ${data.routed_product || 'all products'} | ${elapsed}s round trip`;
+      `${data.cache_hit ? "CACHE HIT" : "cache miss (ran full pipeline)"} | Expanded query: "${data.expanded_query}" | Routed to: ${data.routed_product || 'all products'} | ${elapsed}s round trip`;
   } catch (err) {
     document.getElementById('answer').textContent = "Request failed: " + err;
   }

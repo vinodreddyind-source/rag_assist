@@ -1,17 +1,26 @@
 """
-RUN ON YOUR LAPTOP. Three backends -- pick based on your RAM and API access:
+RUN ON YOUR LAPTOP. Backends, tried in order with automatic fallback:
 
-  GEN_BACKEND=gemini      -- free API, ~0 local RAM. Default.
-  GEN_BACKEND=openrouter  -- free API, ~0 local RAM, built-in provider
-                             fallback list. Good backup when Gemini is
-                             rate-limited/overloaded (as it was earlier).
-  GEN_BACKEND=ollama      -- fully local, needs ~2.5-6GB RAM. Better fit
-                             for 16GB+ laptops.
+  GEN_BACKEND=gemini      -- free API, ~0 local RAM. Default primary.
+  GEN_BACKEND=openrouter  -- free API, ~0 local RAM, own provider fallback.
+  GEN_BACKEND=ollama      -- fully local, needs ~1-3GB RAM for a small model.
 
-Grok deliberately isn't wired in here: xAI doesn't have a reliable free API
-tier (see the reasoning in the README), so it doesn't fit the "free options"
-this project is built around. It's reachable through the openrouter backend
-below at standard paid rates if you ever want it specifically.
+GEN_FALLBACK_TO_OLLAMA=true (default) means: if the primary backend fails
+with a genuine quota/service wall (not a transient error already handled by
+retry.py), automatically fall back to a local Ollama model instead of
+failing the whole request. This is the actual fix for hitting daily quota
+caps mid-demo -- no manual .env editing needed once it's set up.
+
+Recommended small Ollama models for 8GB laptops (pull whichever you want,
+set OLLAMA_MODEL to match):
+  deepseek-r1:1.5b   -- ~1.1GB, DeepSeek's smallest distill, reasoning-
+                        capable despite the size, good fallback choice
+  qwen2.5:1.5b       -- ~1GB, fast, solid general quality
+  llama3.2:3b        -- ~2GB, slightly better quality, slightly more RAM
+
+Kimi K2 is NOT a realistic local option -- it's a ~1 trillion parameter MoE
+model with no meaningful small distill, unlike DeepSeek which specifically
+publishes small distilled versions for exactly this use case.
 
     uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
@@ -22,14 +31,15 @@ generate. No grading, no retry loop, no LangGraph -- that comes in Phase 2.
 import os
 import requests
 from dotenv import load_dotenv
-from retry import retry_with_backoff, is_retryable_llm_error
+from retry import retry_with_backoff, is_retryable_gemini_error, is_retryable_openrouter_error
 
 load_dotenv()  # reads .env into os.environ -- without this, .env does nothing
 
 GEN_BACKEND = os.environ.get("GEN_BACKEND", "gemini")  # gemini | openrouter | ollama
+FALLBACK_TO_OLLAMA = os.environ.get("GEN_FALLBACK_TO_OLLAMA", "true").lower() == "true"
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3.2:3b"  # smaller than 8b -- if you do use Ollama on 8GB, this is the one to pull
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-r1:1.5b")  # ~1.1GB, fits 8GB laptops easily
 
 GENERATION_PROMPT = """You are a helpful assistant answering questions using ONLY the context below.
 If the context doesn't contain enough information, say so clearly. Cite which
@@ -67,13 +77,21 @@ def _generate_gemini(prompt: str) -> str:
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY -- see .env.example")
     client = genai.Client(api_key=api_key)
-    # "gemini-flash-latest" auto-points at the current GA flash model, so
-    # this stops going stale every time Google renames/retires a version --
-    # gemini-2.5-flash itself was retired for new users mid-2026, which is
-    # exactly the failure mode this alias avoids. Pin to an explicit
-    # version instead (e.g. "gemini-3.5-flash") if you need reproducibility
-    # for a specific eval run.
-    response = client.models.generate_content(model="gemini-flash-latest", contents=prompt)
+    # Model choice history, worth knowing: gemini-2.5-flash was the FIRST
+    # model tried here and was already retired for new users (404). Then
+    # "gemini-flash-latest" pointed at gemini-3.5-flash, which turned out to
+    # have only a 20-requests/DAY free quota for this account (confirmed
+    # directly from a real 429 response) -- much stricter than 2.5-flash's
+    # documented ~1,500/day, apparently because newer/flagship models get
+    # tighter introductory free-tier limits than established "lite" variants.
+    # gemini-3.1-flash-lite is the current-generation, cost-tier model most
+    # likely to have a generous free quota. That said: free-tier quotas on
+    # Gemini have changed at least twice just during this project. Don't
+    # trust this comment either -- check the live number for your own
+    # project at https://aistudio.google.com/ (Usage & billing) before
+    # assuming any figure, including this one.
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    response = client.models.generate_content(model=model, contents=prompt)
     return response.text
 
 
@@ -81,14 +99,44 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
     context = format_context(chunks)
     prompt = GENERATION_PROMPT.format(context=context, query=query)
 
+    if GEN_BACKEND == "ollama":
+        return _generate_ollama(prompt)  # already local -- nothing to fall back to
+
     if GEN_BACKEND == "openrouter":
         from llm_openrouter import generate_openrouter
-        return retry_with_backoff(lambda: generate_openrouter(prompt),
-                                   retryable_check=is_retryable_llm_error)
-    if GEN_BACKEND == "gemini":
+        try:
+            return retry_with_backoff(lambda: generate_openrouter(prompt),
+                                       retryable_check=is_retryable_openrouter_error)
+        except Exception as e:
+            return _fallback_or_raise(e, prompt, "OpenRouter")
+
+    # default: gemini
+    try:
         return retry_with_backoff(lambda: _generate_gemini(prompt),
-                                   retryable_check=is_retryable_llm_error)
-    return _generate_ollama(prompt)  # local Ollama -- no external rate limits to retry around
+                                   retryable_check=is_retryable_gemini_error)
+    except Exception as e:
+        return _fallback_or_raise(e, prompt, "Gemini")
+
+
+def _fallback_or_raise(original_error: Exception, prompt: str, backend_name: str) -> str:
+    """Called when the primary cloud backend's retries are exhausted or it
+    failed fast on a non-retryable error (e.g. a daily quota cap). If
+    fallback is enabled, try local Ollama instead of failing the whole
+    request. If Ollama itself isn't running, this raises the ORIGINAL error
+    (not a confusing Ollama connection error), since that's the actually
+    useful thing to see in the logs."""
+    if not FALLBACK_TO_OLLAMA:
+        raise original_error
+    print(f"WARNING: {backend_name} failed ({type(original_error).__name__}: {original_error}). "
+          f"Falling back to local Ollama ({OLLAMA_MODEL})...")
+    try:
+        return _generate_ollama(prompt)
+    except requests.exceptions.ConnectionError:
+        print(f"Ollama fallback also failed -- is it running? (ollama serve, and "
+              f"`ollama pull {OLLAMA_MODEL}` if you haven't). Raising the original "
+              f"{backend_name} error instead of the Ollama connection error, since "
+              f"that's the more useful one to see.")
+        raise original_error
 
 
 if __name__ == "__main__":

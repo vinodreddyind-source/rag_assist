@@ -28,43 +28,81 @@ RUN ON YOUR LAPTOP with a GEMINI_API_KEY environment variable set
 import os
 import re
 from dotenv import load_dotenv
-from retry import retry_with_backoff, is_retryable_llm_error
+from retry import retry_with_backoff, is_retryable_gemini_error
 
 load_dotenv()
 
-RERANK_PROMPT = """Score how relevant this document chunk is to the query, on a scale of 0.0 to 1.0.
-Output ONLY the number, nothing else.
+RERANK_PROMPT = """Score how relevant each numbered document is to the query, on a scale of 0.0 to 1.0.
+Return ONLY a JSON array of scores in the same order as the documents, e.g. [0.8, 0.2, 0.5]
+No other text, no explanation, just the JSON array.
 
 Query: {query}
 
-Document: {document}
+Documents:
+{documents}
 
-Relevance score (0.0-1.0):"""
+Scores (JSON array):"""
 
 
 def rerank_with_gemini(query: str, candidates: list[dict], top_n: int = 5,
-                        model: str = "gemini-flash-latest") -> list[dict]:
+                        model: str | None = None) -> list[dict]:
+    """Listwise reranking: ONE API call scores all candidates together,
+    instead of one call per candidate. This isn't just a rate-limit
+    workaround -- fewer, larger calls is the standard efficiency pattern
+    for LLM-based reranking in production, and it's also a fairer
+    comparison across candidates since the model sees them side by side
+    rather than scoring each in isolation."""
+    import json
     from google import genai
 
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("Set GEMINI_API_KEY (free, from Google AI Studio) before running this.")
 
+    # See generate.py's _generate_gemini for the full story: "latest" and
+    # "2.5-flash" both turned out to be worse choices than this, for
+    # different reasons (retired-for-new-users vs. surprisingly low quota).
+    # Check https://aistudio.google.com/ for your project's live numbers
+    # rather than trusting any hardcoded default, including this one.
+    if model is None:
+        model = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+
     client = genai.Client(api_key=api_key)
 
-    scored = []
-    for c in candidates:
-        prompt = RERANK_PROMPT.format(query=query, document=c["text"])
-        response = retry_with_backoff(
-            lambda p=prompt: client.models.generate_content(model=model, contents=p),
-            retryable_check=is_retryable_llm_error,
-        )
-        match = re.search(r"[\d.]+", response.text.strip())
-        score = float(match.group()) if match else 0.0
-        scored.append((c, score))
+    documents_block = "\n".join(f"{i+1}. {c['text']}" for i, c in enumerate(candidates))
+    prompt = RERANK_PROMPT.format(query=query, documents=documents_block)
 
+    response = retry_with_backoff(
+        lambda: client.models.generate_content(model=model, contents=prompt),
+        retryable_check=is_retryable_gemini_error,
+    )
+
+    scores = _parse_score_array(response.text, expected_len=len(candidates))
+    scored = list(zip(candidates, scores))
     scored.sort(key=lambda x: x[1], reverse=True)
     return [c for c, _score in scored[:top_n]]
+
+
+def _parse_score_array(text: str, expected_len: int) -> list[float]:
+    """Parses the model's JSON array response. Falls back to all-zero
+    scores (preserves original order) if parsing fails, rather than
+    crashing the whole request -- a malformed rerank response shouldn't
+    take down generation, which is the actually-important step."""
+    import json
+    import re
+    match = re.search(r"\[[\d.,\s]+\]", text)
+    if not match:
+        print(f"WARNING: could not parse rerank scores from response: {text[:200]!r}")
+        return [0.0] * expected_len
+    try:
+        scores = json.loads(match.group())
+        if len(scores) != expected_len:
+            print(f"WARNING: got {len(scores)} scores for {expected_len} candidates -- padding/truncating")
+            scores = (scores + [0.0] * expected_len)[:expected_len]
+        return [float(s) for s in scores]
+    except (json.JSONDecodeError, ValueError):
+        print(f"WARNING: could not parse rerank scores from response: {text[:200]!r}")
+        return [0.0] * expected_len
 
 
 if __name__ == "__main__":

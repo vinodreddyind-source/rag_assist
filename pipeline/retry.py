@@ -60,6 +60,44 @@ def is_retryable_llm_error(exception: Exception) -> bool:
     return any(signal in error_str for signal in retryable_signals)
 
 
+def is_retryable_openrouter_error(exception: Exception) -> bool:
+    """OpenRouter's free tier is capped at 50 requests/DAY (not just per-
+    minute) -- a 429 there is much more likely to be the daily cap than a
+    few-seconds blip, and short exponential backoff (a few seconds) does
+    nothing useful against a limit that resets in hours. So: retry 503s/
+    timeouts as usual, but fail FAST on 429 with a clear message instead of
+    burning 3-4 attempts against a wall that won't move. This is the
+    opposite tradeoff from Gemini's 503, which genuinely was worth a short
+    retry -- know which kind of rate limit you're looking at before
+    choosing a retry strategy, rather than treating all 429/503s the same."""
+    error_str = str(exception).lower()
+    if "429" in error_str:
+        return False  # fail fast -- almost certainly the daily cap, not transient
+    retryable_signals = ["503", "unavailable", "timeout", "overloaded", "high demand"]
+    return any(signal in error_str for signal in retryable_signals)
+
+
+def is_retryable_gemini_error(exception: Exception) -> bool:
+    """Gemini's 429s carry a quotaId in the error body that says exactly
+    which limit was hit -- "PerDay" means don't bother retrying (won't
+    clear for hours), while a per-minute/RPM limit genuinely can clear in
+    seconds and is worth a short backoff. Found this distinction the hard
+    way: a real 429 here included 'GenerateRequestsPerDayPerProjectPerModel'
+    in its body, and the generic retry check wasted 3 attempts against it
+    before failing anyway. 503s (server overload, unrelated to your quota)
+    are still always worth retrying."""
+    error_str = str(exception)
+    if "perday" in error_str.lower().replace(" ", "").replace("_", ""):
+        return False  # daily cap -- fail fast, retrying within seconds can't help
+    error_lower = error_str.lower()
+    retryable_signals = ["503", "unavailable", "high demand", "timeout", "overloaded"]
+    if any(signal in error_lower for signal in retryable_signals):
+        return True
+    # A 429 without a "PerDay" marker is probably a per-minute/RPM limit --
+    # short backoff can genuinely help here.
+    return "429" in error_lower or "rate limit" in error_lower
+
+
 if __name__ == "__main__":
     # Fully testable without any network call -- simulate a flaky function
     # that fails twice with a "retryable" error, then succeeds.

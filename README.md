@@ -212,3 +212,88 @@ getting retired, a provider having a bad day) is a real production risk,
 and retry-with-backoff plus a fallback provider are the standard mitigations
 -- not a one-off fix for this specific error. Good thing to mention
 unprompted if asked about production reliability.
+
+## Real Gemini model/quota lesson (worth remembering for interviews)
+
+Three different failures, same underlying cause -- chasing "the newest/most
+convenient model name" instead of checking your actual project's live quota:
+
+1. `gemini-2.5-flash` (first model tried) -- retired for new API users, 404.
+2. `gemini-flash-latest` (the "avoid staleness" fix) -- silently resolved to
+   `gemini-3.5-flash`, whose free-tier daily quota turned out to be only 20
+   requests/day for this account (confirmed directly from a real 429 body),
+   far stricter than older Flash models.
+3. Now pinned to `gemini-3.1-flash-lite`, configurable via `GEMINI_MODEL` in
+   `.env` -- but even this may not hold. **Check your live quota at
+   https://aistudio.google.com/ (Usage & billing) rather than trusting any
+   number in this README, including this one.**
+
+Also fixed: `pipeline/retry.py` now distinguishes a Gemini 429 caused by the
+**daily** cap (fails fast -- the error body literally contains
+`GenerateRequestsPerDayPerProjectPerModel`, so there's no ambiguity) from a
+per-minute rate limit (still worth a short backoff). Retrying a daily cap
+for a few seconds was pure wasted time before this fix.
+
+**Interview framing:** this is a real, current example of why production
+systems pin explicit model versions with monitored quotas rather than
+following "latest" aliases, and why retry logic needs to actually parse
+the error body instead of treating every 429 the same.
+
+## Automatic fallback to local DeepSeek when cloud quota is hit
+
+`generate.py` now falls back to a local Ollama model automatically when
+Gemini or OpenRouter fail with a real quota/service error (not just a
+transient blip already handled by retry.py). No manual `.env` editing mid-
+demo required.
+
+**Kimi K2 is not usable locally** -- it's a ~1 trillion parameter MoE model
+with no meaningful small distill available. **DeepSeek is the right choice**
+-- DeepSeek-R1 publishes genuinely small distilled versions specifically for
+constrained hardware:
+
+| Model | Size | Fit for 8GB laptop |
+|---|---|---|
+| `deepseek-r1:1.5b` (default here) | ~1.1GB | Comfortable |
+| `qwen2.5:1.5b` | ~1GB | Comfortable |
+| `llama3.2:3b` | ~2GB | Fine, slightly better quality |
+
+Setup:
+```powershell
+# Install Ollama from https://ollama.com, then:
+ollama pull deepseek-r1:1.5b
+```
+
+That's it -- as long as Ollama is running (`ollama serve`, or it may already
+run as a background service after install) and the model is pulled,
+`generate.py` will automatically drop to it if Gemini/OpenRouter hit a wall.
+If Ollama ISN'T running when a fallback is attempted, you'll see the
+*original* cloud error in the logs, not a confusing Ollama connection
+error -- that's deliberate, since the cloud error is the one that's
+actually useful to see.
+
+Set `GEN_FALLBACK_TO_OLLAMA=false` in `.env` to disable this and just fail
+normally if you want to see raw cloud errors without the fallback masking
+them (useful when you're specifically debugging the cloud backend itself,
+like we were earlier today).
+
+## Heads-up for Phase 2: a real version conflict is coming
+
+RAGAS 0.2.15 (the version pinned above, chosen because it's the last one
+that imports cleanly) needs `langchain-core<1.0`. But **LangGraph 1.x**
+(needed for Phase 2's actual agentic loop) needs `langchain-core>=1.2`.
+Those two requirements can't both be satisfied in one environment.
+
+Not a problem today -- ragas_eval.py doesn't use LangGraph, and nothing in
+Phase 1 does either. But when Phase 2 starts, expect to need either:
+- A second virtual environment specifically for running `ragas_eval.py`
+  (kept on the old langchain-core), separate from the one running the
+  LangGraph app itself, or
+- A newer ragas release that's fixed its LangChain-ecosystem imports by
+  then -- worth checking `pip index versions ragas` again before assuming
+  today's pin is still the right one.
+
+This is itself a legitimate interview point: fast-moving ecosystems
+(RAGAS, LangChain, LangGraph, Gemini's SDK/model names -- all four broke
+at least once during this project) mean pinned, tested dependency sets
+are not optional for anything meant to actually run reliably, and CI needs
+to catch version drift before it reaches anyone relying on the tool.
