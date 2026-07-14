@@ -1,0 +1,110 @@
+[
+  {
+    "doc_id": "claimcenter_0001",
+    "product": "ClaimCenter",
+    "section": "First Notice of Loss (FNOL) Intake",
+    "doc_type": "release_notes",
+    "version": "10.x",
+    "department": "claims",
+    "file": "ClaimCenter/claimcenter_0001.md"
+  },
+  {
+    "doc_id": "claimcenter_0002",
+    "product": "ClaimCenter",
+    "section": "Deductible Calculation",
+    "doc_type": "user_guide",
+    "version": "11.x",
+    "department": "claims",
+    "file": "ClaimCenter/claimcenter_0002.md"
+  },
+  {
+    "doc_id": "claimcenter_0003",
+    "product": "ClaimCenter",
+    "section": "Claim Reserve Adjustment",
+    "doc_type": "user_guide",
+    "version": "10.x",
+    "department": "claims",
+    "file": "ClaimCenter/claimcenter_0003.md"
+  },
+  {
+    "doc_id": "claimcenter_0004",
+    "product": "ClaimCenter",
+    "section": "Renewal Impact on Open Claims",
+    "doc_type": "user_guide",
+    "version": "10.x",
+    "department": "claims",
+    "file": "ClaimCenter/claimcenter_0004.md"
+  },
+  {
+    "doc_id": "billingcenter_0005",
+    "product": "BillingCenter",
+    "section": "Premium Invoice Generation",
+    "doc_type": "release_notes",
+    "version": "10.x",
+    "department": "billing",
+    "file": "BillingCenter/billingcenter_0005.md"
+  },
+  {
+    "doc_id": "billingcenter_0006",
+    "product": "BillingCenter",
+    "section": "No Claims Discount (NCD) Application",
+    "doc_type": "release_notes",
+    "version": "11.x",
+    "department": "billing",
+    "file": "BillingCenter/billingcenter_0006.md"
+  },
+  {
+    "doc_id": "billingcenter_0007",
+    "product": "BillingCenter",
+    "section": "Payment Failure Handling",
+    "doc_type": "user_guide",
+    "version": "10.x",
+    "department": "billing",
+    "file": "BillingCenter/billingcenter_0007.md"
+  },
+  {
+    "doc_id": "billingcenter_0008",
+    "product": "BillingCenter",
+    "section": "Mid-Term Policy Changes and Billing",
+    "doc_type": "user_guide",
+    "version": "10.x",
+    "department": "billing",
+    "file": "BillingCenter/billingcenter_0008.md"
+  },
+  {
+    "doc_id": "policycenter_0009",
+    "product": "PolicyCenter",
+    "section": "Policy Renewal Processing",
+    "doc_type": "user_guide",
+    "version": "10.x",
+    "department": "underwriting",
+    "file": "PolicyCenter/policycenter_0009.md"
+  },
+  {
+    "doc_id": "policycenter_0010",
+    "product": "PolicyCenter",
+    "section": "Underwriting Referral Rules",
+    "doc_type": "release_notes",
+    "version": "10.x",
+    "department": "underwriting",
+    "file": "PolicyCenter/policycenter_0010.md"
+  },
+  {
+    "doc_id": "policycenter_0011",
+    "product": "PolicyCenter",
+    "section": "Mid-Term Endorsements",
+    "doc_type": "release_notes",
+    "version": "11.x",
+    "department": "underwriting",
+    "file": "PolicyCenter/policycenter_0011.md"
+  },
+  {
+    "doc_id": "policycenter_0012",
+    "product": "PolicyCenter",
+    "section": "Cross-Product: Renewal While Claim Is Open",
+    "doc_type": "user_guide",
+    "version": "11.x",
+    "department": "underwriting",
+    "file": "PolicyCenter/policycenter_0012.md"
+  }
+]

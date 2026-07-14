@@ -1,0 +1,9 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+data/chunk_vectors.npy
+data/chunk_vector_index.json
+*.egg-info/
+.pytest_cache/

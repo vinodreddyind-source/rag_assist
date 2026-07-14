@@ -1,0 +1,50 @@
+[
+  {
+    "question": "How is the deductible determined when a claim spans a policy renewal?",
+    "expected_source": "policycenter_0004.md",
+    "expected_answer": "The pre-renewal deductible applies -- the claim retains the coverage terms active at the loss date, not the newly renewed term.",
+    "type": "cross_product"
+  },
+  {
+    "question": "How does CC handle FNOL for a BI claim?",
+    "expected_source": "claimcenter_0001.md",
+    "expected_answer": "ClaimCenter requires confirming loss date, policy number, and line of business, plus an additional injury-details step for bodily injury claims before Coverage Review.",
+    "type": "abbreviation"
+  },
+  {
+    "question": "What happens to the NCD if a customer has an at-fault claim?",
+    "expected_source": "billingcenter_0002.md",
+    "expected_answer": "A single at-fault claim resets the no claims discount tier; a not-at-fault claim does not affect NCD tier progression.",
+    "type": "abbreviation"
+  },
+  {
+    "question": "When does PolicyCenter automatically trigger underwriting review at renewal?",
+    "expected_source": "policycenter_0001.md",
+    "expected_answer": "Underwriting review triggers automatically if the account has an open claim with reserves above $25,000, or if risk-scoring flags a change in exposure.",
+    "type": "plain"
+  },
+  {
+    "question": "What happens if an EFT payment fails?",
+    "expected_source": "billingcenter_0003.md",
+    "expected_answer": "BillingCenter retries the draft once after 3 business days before flagging the account for manual collections review.",
+    "type": "abbreviation"
+  },
+  {
+    "question": "Is the per-occurrence or per-item deductible used for a PD claim with multiple covered items?",
+    "expected_source": "claimcenter_0002.md",
+    "expected_answer": "A single per-occurrence deductible applies, unless the policy explicitly defines split per-item deductibles for that line of business.",
+    "type": "abbreviation"
+  },
+  {
+    "question": "Does a mid-term endorsement trigger a full annual re-bill?",
+    "expected_source": "billingcenter_0004.md",
+    "expected_answer": "No -- it triggers a pro-rated premium adjustment for the remaining term, not a full re-bill of the annual premium.",
+    "type": "plain"
+  },
+  {
+    "question": "What claim history flag forces an underwriting referral?",
+    "expected_source": "policycenter_0002.md",
+    "expected_answer": "A claim history that includes an SIU-flagged claim within the past 3 years forces a referral to underwriting review.",
+    "type": "abbreviation"
+  }
+]

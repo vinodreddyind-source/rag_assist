@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Insurance Docs Assistant</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 1.3rem; }
+  #q { width: 100%; padding: 10px; font-size: 1rem; box-sizing: border-box; }
+  button { padding: 10px 20px; margin-top: 10px; cursor: pointer; }
+  #answer { margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 6px; white-space: pre-wrap; }
+  #sources { font-size: 0.85rem; color: #555; margin-top: 10px; }
+  #meta { font-size: 0.75rem; color: #999; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Insurance Docs Assistant (ClaimCenter / BillingCenter / PolicyCenter)</h1>
+  <input id="q" placeholder="e.g. how does CC handle FNOL for a BI claim?" />
+  <button onclick="ask()">Ask</button>
+  <div id="answer"></div>
+  <div id="sources"></div>
+  <div id="meta"></div>
+
+<script>
+async function ask() {
+  const q = document.getElementById('q').value;
+  document.getElementById('answer').textContent = "Thinking...";
+  document.getElementById('sources').textContent = "";
+  document.getElementById('meta').textContent = "";
+
+  const start = performance.now();
+  try {
+    const res = await fetch('/query', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: q})
+    });
+    if (!res.ok) {
+      document.getElementById('answer').textContent = `Error: ${res.status} ${res.statusText}`;
+      return;
+    }
+    const data = await res.json();
+    const elapsed = ((performance.now() - start) / 1000).toFixed(2);
+
+    document.getElementById('answer').textContent = data.answer;
+    document.getElementById('sources').textContent = "Sources: " + data.sources.join(", ");
+    document.getElementById('meta').textContent =
+      `Expanded query: "${data.expanded_query}" | Routed to: ${data.routed_product || 'all products'} | ${elapsed}s round trip`;
+  } catch (err) {
+    document.getElementById('answer').textContent = "Request failed: " + err;
+  }
+}
+
+document.getElementById('q').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') ask();
+});
+</script>
+</body>
+</html>
