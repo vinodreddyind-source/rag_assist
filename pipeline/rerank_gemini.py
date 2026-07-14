@@ -28,6 +28,7 @@ RUN ON YOUR LAPTOP with a GEMINI_API_KEY environment variable set
 import os
 import re
 from dotenv import load_dotenv
+from retry import retry_with_backoff, is_retryable_llm_error
 
 load_dotenv()
 
@@ -54,7 +55,10 @@ def rerank_with_gemini(query: str, candidates: list[dict], top_n: int = 5,
     scored = []
     for c in candidates:
         prompt = RERANK_PROMPT.format(query=query, document=c["text"])
-        response = client.models.generate_content(model=model, contents=prompt)
+        response = retry_with_backoff(
+            lambda p=prompt: client.models.generate_content(model=model, contents=p),
+            retryable_check=is_retryable_llm_error,
+        )
         match = re.search(r"[\d.]+", response.text.strip())
         score = float(match.group()) if match else 0.0
         scored.append((c, score))

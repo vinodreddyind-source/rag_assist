@@ -31,6 +31,8 @@ RERANK_BACKEND = os.environ.get("RERANK_BACKEND", "gemini")
 
 if RERANK_BACKEND == "gemini":
     from rerank_gemini import rerank_with_gemini as rerank
+elif RERANK_BACKEND == "openrouter":
+    from llm_openrouter import rerank_with_openrouter as rerank
 else:
     from rerank import rerank
 

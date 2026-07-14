@@ -1,11 +1,17 @@
 """
-RUN ON YOUR LAPTOP. Two backends -- pick based on your RAM:
+RUN ON YOUR LAPTOP. Three backends -- pick based on your RAM and API access:
 
-  GEN_BACKEND=ollama  -- fully local, needs ~2.5-6GB RAM depending on model
-                          size (see MODEL below). Better fit for 16GB+ laptops.
-  GEN_BACKEND=gemini   -- free API, ~0 local RAM. Recommended default for
-                          8GB laptops, since it removes the single biggest
-                          RAM cost in this whole pipeline.
+  GEN_BACKEND=gemini      -- free API, ~0 local RAM. Default.
+  GEN_BACKEND=openrouter  -- free API, ~0 local RAM, built-in provider
+                             fallback list. Good backup when Gemini is
+                             rate-limited/overloaded (as it was earlier).
+  GEN_BACKEND=ollama      -- fully local, needs ~2.5-6GB RAM. Better fit
+                             for 16GB+ laptops.
+
+Grok deliberately isn't wired in here: xAI doesn't have a reliable free API
+tier (see the reasoning in the README), so it doesn't fit the "free options"
+this project is built around. It's reachable through the openrouter backend
+below at standard paid rates if you ever want it specifically.
 
     uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
@@ -16,10 +22,11 @@ generate. No grading, no retry loop, no LangGraph -- that comes in Phase 2.
 import os
 import requests
 from dotenv import load_dotenv
+from retry import retry_with_backoff, is_retryable_llm_error
 
 load_dotenv()  # reads .env into os.environ -- without this, .env does nothing
 
-GEN_BACKEND = os.environ.get("GEN_BACKEND", "gemini")  # default: RAM-friendly
+GEN_BACKEND = os.environ.get("GEN_BACKEND", "gemini")  # gemini | openrouter | ollama
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "llama3.2:3b"  # smaller than 8b -- if you do use Ollama on 8GB, this is the one to pull
@@ -74,9 +81,14 @@ def generate_answer(query: str, chunks: list[dict]) -> str:
     context = format_context(chunks)
     prompt = GENERATION_PROMPT.format(context=context, query=query)
 
+    if GEN_BACKEND == "openrouter":
+        from llm_openrouter import generate_openrouter
+        return retry_with_backoff(lambda: generate_openrouter(prompt),
+                                   retryable_check=is_retryable_llm_error)
     if GEN_BACKEND == "gemini":
-        return _generate_gemini(prompt)
-    return _generate_ollama(prompt)
+        return retry_with_backoff(lambda: _generate_gemini(prompt),
+                                   retryable_check=is_retryable_llm_error)
+    return _generate_ollama(prompt)  # local Ollama -- no external rate limits to retry around
 
 
 if __name__ == "__main__":

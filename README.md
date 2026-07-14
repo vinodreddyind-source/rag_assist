@@ -185,3 +185,30 @@ Bedrock or a dedicated GPU-backed self-hosted model, because you need
 shared state across replicas and consistent latency under real load,
 neither of which a single laptop's disk-backed cache or embedded vector
 store can give you." That's a stronger answer than either extreme alone.
+
+## Third backend: OpenRouter (free, with automatic provider fallback)
+
+Added as a resilience option after hitting a real Gemini 503 ("high demand")
+mid-build. Two independent fixes now handle that:
+
+1. **`pipeline/retry.py`** -- retries the SAME model after exponential
+   backoff + jitter. Wraps every Gemini call now (both generation and
+   reranking).
+2. **`pipeline/llm_openrouter.py`** -- a DIFFERENT model/provider entirely,
+   via OpenRouter's free tier (`meta-llama/llama-3.3-70b-instruct:free` by
+   default, with its own fallback list). Set `GEN_BACKEND=openrouter` and/or
+   `RERANK_BACKEND=openrouter` in `.env` to use it instead of Gemini.
+
+Get a free key (no card) at https://openrouter.ai/keys. Verified limits
+mid-2026: 20 requests/minute, 50/day (permanently rising to 1000/day after
+ever purchasing $10 in credits -- optional, never required).
+
+**Grok was deliberately not wired in** -- it's reachable through OpenRouter,
+but at standard paid xAI rates, not free. Not worth a separate integration
+for this project.
+
+**Interview framing for this whole detour:** external API churn (a model
+getting retired, a provider having a bad day) is a real production risk,
+and retry-with-backoff plus a fallback provider are the standard mitigations
+-- not a one-off fix for this specific error. Good thing to mention
+unprompted if asked about production reliability.
