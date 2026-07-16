@@ -297,3 +297,28 @@ This is itself a legitimate interview point: fast-moving ecosystems
 at least once during this project) mean pinned, tested dependency sets
 are not optional for anything meant to actually run reliably, and CI needs
 to catch version drift before it reaches anyone relying on the tool.
+
+## Two requirements files now, on purpose
+
+`requirements.txt` -- the main app (`rag_sys` venv). Includes `langgraph`
+and a modern `langchain-core` (>=1.2) for Phase 2.
+
+`requirements-ragas.txt` -- the eval harness only (`ragas_venv` venv,
+Python 3.12 specifically). Pins `langchain-core<1.0` for `ragas==0.2.15`
+compatibility.
+
+These two can't be merged into one file -- `ragas` and `langgraph` need
+incompatible `langchain-core` major versions. This is why the eval harness
+lives in a separate venv in the first place, not just a Python-version
+workaround.
+
+To (re)install either environment cleanly:
+```powershell
+# Main app
+rag_sys\Scripts\activate
+pip install -r requirements.txt
+
+# Eval harness
+ragas_venv\Scripts\activate
+pip install -r requirements-ragas.txt
+```

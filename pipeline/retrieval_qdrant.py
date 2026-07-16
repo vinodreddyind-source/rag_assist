@@ -167,18 +167,45 @@ class QdrantHybridRetriever:
             self._embed_model = SentenceTransformer("all-MiniLM-L6-v2")
         return self._embed_model.encode([query])[0]
 
-    def hybrid_search(self, query: str, k: int = 5):
+    def hybrid_search(self, query: str, k: int = 5, product_filter: str | None = None):
+        """product_filter: restrict to one product's chunks (from route_product()).
+        Falls back to an unfiltered search if the filtered result set is too
+        thin (fewer than k results) -- a routing misfire should degrade
+        gracefully to "search everything", not silently starve retrieval of
+        results. This is the actual fix for the bug flagged earlier: routing
+        was computed but never affected retrieval, making it purely cosmetic.
+        Now it does affect retrieval, with a safety net for when it's wrong."""
         query_vec = self._embed_query(query)
+
+        query_filter = None
+        if product_filter:
+            query_filter = models.Filter(
+                must=[models.FieldCondition(
+                    key="metadata.product",
+                    match=models.MatchValue(value=product_filter),
+                )]
+            )
+
         results = self.client.query_points(
             collection_name=COLLECTION,
             prefetch=[
-                models.Prefetch(query=query_vec.tolist(), using="dense", limit=20),
-                models.Prefetch(query=sparse_vector(query), using="sparse", limit=20),
+                models.Prefetch(query=query_vec.tolist(), using="dense", limit=20, filter=query_filter),
+                models.Prefetch(query=sparse_vector(query), using="sparse", limit=20, filter=query_filter),
             ],
             query=models.FusionQuery(fusion=models.Fusion.RRF),
+            query_filter=query_filter,
             limit=k,
         )
-        return [(point.payload, point.score) for point in results.points]
+        hits = [(point.payload, point.score) for point in results.points]
+
+        if product_filter and len(hits) < k:
+            print(f"WARNING: filtered search for product={product_filter!r} only "
+                  f"returned {len(hits)}/{k} results -- falling back to unfiltered "
+                  f"search. Either routing misfired, or that product genuinely has "
+                  f"few matching chunks.")
+            return self.hybrid_search(query, k=k, product_filter=None)
+
+        return hits
 
 
 if __name__ == "__main__":

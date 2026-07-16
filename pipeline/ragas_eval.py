@@ -49,7 +49,7 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(__file__))
 from retrieval_qdrant import QdrantHybridRetriever
-from query_processing import expand_acronyms
+from query_processing import expand_acronyms, route_product
 from generate import generate_answer
 
 RERANK_BACKEND = os.environ.get("RERANK_BACKEND", "gemini")
@@ -100,7 +100,8 @@ def run_pipeline_on_golden_set():
     for item in golden:
         query = item["question"]
         expanded = expand_acronyms(query)
-        candidates = [c for c, _ in retriever.hybrid_search(expanded, k=10)]
+        product = route_product(expanded)
+        candidates = [c for c, _ in retriever.hybrid_search(expanded, k=10, product_filter=product)]
         top_chunks = rerank(query, candidates, top_n=5)
         answer = generate_answer(query, top_chunks)
 

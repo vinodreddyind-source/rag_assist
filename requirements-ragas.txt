@@ -1,0 +1,25 @@
+# RAGAS eval environment (ragas_venv venv, Python 3.12 specifically).
+# Deliberately separate from the main app's requirements.txt -- ragas==0.2.15
+# needs langchain-core<1.0, which conflicts with langgraph (>=1.2) needed by
+# the main app. Two environments, two dependency sets, on purpose.
+#
+# Also needs Python 3.12 specifically -- ragas 0.2.15's async executor hits a
+# genuine asyncio incompatibility under Python 3.14. See README for the full
+# story.
+
+ragas==0.2.15
+langchain-community==0.3.27
+langchain-google-genai==2.1.12
+langchain-core<1.0
+datasets>=2.20.0
+sentence-transformers>=3.0.0
+numpy>=1.26.0
+qdrant-client>=1.12.0
+google-genai>=1.0.0
+presidio-analyzer>=2.2.0
+presidio-anonymizer>=2.2.0
+spacy>=3.7.0
+diskcache>=5.6.0
+python-dotenv>=1.0.0
+requests>=2.32.0
+nest_asyncio>=1.6.0

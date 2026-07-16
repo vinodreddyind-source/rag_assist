@@ -28,9 +28,16 @@ async function ask() {
   document.getElementById('sources').textContent = "";
   document.getElementById('meta').textContent = "";
 
+  // Passcode gate: if this page's own URL was shared as .../?passcode=XYZ,
+  // extract it here and pass it through to /query. Whoever you share the
+  // link with never sees a login prompt -- it's baked into the link itself.
+  // If DEMO_PASSCODE isn't set server-side, this parameter is simply ignored.
+  const passcode = new URLSearchParams(window.location.search).get('passcode');
+  const queryUrl = passcode ? `/query?passcode=${encodeURIComponent(passcode)}` : '/query';
+
   const start = performance.now();
   try {
-    const res = await fetch('/query', {
+    const res = await fetch(queryUrl, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({query: q})

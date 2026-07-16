@@ -24,18 +24,39 @@ from generate import generate_answer
 from monitoring import monitor
 from rate_limit import rate_limiter
 from guardrails import redact_pii, check_injection
+from demo_gate import passcode_required, check_passcode
 from semantic_cache_lite import DiskSemanticCache
 
 # Matches GEN_BACKEND's pattern: default to Gemini so an 8GB laptop never
 # needs to download the local cross-encoder alongside the embedding model.
 RERANK_BACKEND = os.environ.get("RERANK_BACKEND", "gemini")
+RERANK_FALLBACK_TO_OLLAMA = os.environ.get("GEN_FALLBACK_TO_OLLAMA", "true").lower() == "true"
 
 if RERANK_BACKEND == "gemini":
-    from rerank_gemini import rerank_with_gemini as rerank
+    from rerank_gemini import rerank_with_gemini as _primary_rerank
 elif RERANK_BACKEND == "openrouter":
-    from llm_openrouter import rerank_with_openrouter as rerank
+    from llm_openrouter import rerank_with_openrouter as _primary_rerank
+elif RERANK_BACKEND == "ollama":
+    from rerank_ollama import rerank_with_ollama as _primary_rerank
 else:
-    from rerank import rerank
+    from rerank import rerank as _primary_rerank
+
+
+def rerank(query: str, candidates: list, top_n: int = 5):
+    if RERANK_BACKEND == "ollama":
+        return _primary_rerank(query, candidates, top_n=top_n)  # already local
+    try:
+        return _primary_rerank(query, candidates, top_n=top_n)
+    except Exception as e:
+        if not RERANK_FALLBACK_TO_OLLAMA:
+            raise
+        print(f"WARNING: {RERANK_BACKEND} reranker failed ({type(e).__name__}: {e}). "
+              f"Falling back to local Ollama reranker...")
+        from rerank_ollama import rerank_with_ollama
+        try:
+            return rerank_with_ollama(query, candidates, top_n=top_n)
+        except Exception:
+            raise e  # surface the ORIGINAL error, same reasoning as generate.py's fallback
 
 app = FastAPI(title="Insurance Docs RAG (Advanced/Linear)")
 
@@ -52,6 +73,15 @@ _cache = DiskSemanticCache(embed_fn=_retriever._embed_query, cache_dir="./cache_
 
 @app.middleware("http")
 async def rate_limit_and_timing(request: Request, call_next):
+    # Passcode gate: only active if DEMO_PASSCODE is set in .env. Checked via
+    # a query param (?passcode=...) so a single shareable link works in a
+    # plain browser -- no login form, no session, deliberately lightweight
+    # for a "share one link during one demo" use case, not real auth.
+    if passcode_required() and request.url.path in ("/query", "/query/agentic"):
+        provided = request.query_params.get("passcode")
+        if not check_passcode(provided):
+            raise HTTPException(status_code=401, detail="Missing or incorrect passcode")
+
     client_key = request.client.host if request.client else "unknown"
     if request.url.path == "/query" and not rate_limiter.allow(client_key):
         raise HTTPException(status_code=429, detail="Rate limit exceeded, try again shortly")
@@ -82,6 +112,15 @@ class QueryResponse(BaseModel):
     cache_hit: bool
 
 
+class AgenticQueryResponse(BaseModel):
+    query: str
+    answer: str
+    sources: list[str]
+    retry_count: int
+    relevance_score: float
+    route_history: list[str]
+
+
 @app.post("/query", response_model=QueryResponse)
 async def query_endpoint(payload: QueryRequest):
     if check_injection(payload.query):
@@ -109,7 +148,7 @@ async def query_endpoint(payload: QueryRequest):
     expanded = expand_acronyms(redacted_query)
     product = route_product(expanded)
 
-    candidates = [c for c, _ in _retriever.hybrid_search(expanded, k=10)]
+    candidates = [c for c, _ in _retriever.hybrid_search(expanded, k=10, product_filter=product)]
     top_chunks = rerank(redacted_query, candidates, top_n=5)
 
     answer = generate_answer(redacted_query, top_chunks)
@@ -124,6 +163,31 @@ async def query_endpoint(payload: QueryRequest):
         answer=answer,
         sources=sources,
         cache_hit=False,
+    )
+
+
+@app.post("/query/agentic", response_model=AgenticQueryResponse)
+async def agentic_query_endpoint(payload: QueryRequest):
+    """The LangGraph version -- same underlying components as /query
+    (guardrails, retrieval, rerank, generation), but with a self-correcting
+    retrieve-grade-rewrite loop instead of a single linear pass. Directly
+    comparable to /query on the same corpus -- run both on the same tricky
+    query and compare route_history/retry_count against the linear
+    endpoint's single-pass result."""
+    from agentic_graph import run_agentic_query
+
+    try:
+        result = run_agentic_query(payload.query)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return AgenticQueryResponse(
+        query=payload.query,
+        answer=result["generation"],
+        sources=result["sources"],
+        retry_count=result["retry_count"],
+        relevance_score=result["relevance_score"],
+        route_history=result["route_history"],
     )
 
 

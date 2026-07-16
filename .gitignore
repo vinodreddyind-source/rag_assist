@@ -11,3 +11,4 @@ data/chunk_vector_index.json
 .pytest_cache/
 cache_data/
 qdrant_data/
+*.png
