@@ -1,9 +1,19 @@
-# Main app (rag_sys venv) - FastAPI, retrieval, generation, guardrails, Phase 2 LangGraph.
-# Does NOT include ragas/langchain-community/langchain-google-genai -- those are
-# only needed for the eval harness, which runs in a separate environment
+# Main app (rag_sys venv, Python 3.14) - FastAPI, retrieval, generation,
+# guardrails, Phase 2 LangGraph.
+#
+# Does NOT include ragas/langchain-community/langchain-google-genai -- those
+# are only needed for the eval harness, which runs in a separate environment
 # (ragas_venv, Python 3.12) because of a real langchain-core version conflict:
 # ragas==0.2.15 needs langchain-core<1.0, langgraph needs langchain-core>=1.2.
 # See requirements-ragas.txt for that environment's pins.
+#
+# Does NOT include crewai -- crewai declares Requires-Python <3.14 in its own
+# package metadata (confirmed directly from a real pip error), so it can
+# NEVER install in this venv regardless of any other fix. Phase 3 runs in
+# its own separate environment (crewai_venv, Python 3.12). See
+# requirements-crewai.txt for that environment's pins. Do not add crewai
+# back to this file -- it will silently resolve to an ancient pre-1.0
+# version and then fail to build from source.
 
 langchain-text-splitters>=0.3.0
 langchain-core>=1.2.0

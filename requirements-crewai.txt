@@ -1,0 +1,33 @@
+# Phase 3 environment (crewai_venv venv, Python 3.12 specifically).
+# Deliberately separate from the main app's requirements.txt -- crewai
+# declares Requires-Python <3.14 in its own package metadata, confirmed
+# directly from pip: every crewai version from 0.95.0 through the current
+# 1.15.3 explicitly excludes Python 3.14. Only ancient pre-1.0 versions
+# (predating Python 3.14's existence, so they never added an upper bound)
+# will install there at all -- and those then fail to build regex/tiktoken
+# from source. Same root-cause pattern as ragas needing its own venv, just
+# a harder wall this time: not "no wheel published yet," but "the library
+# author has explicitly excluded this Python version."
+#
+# This file includes the full app stack (not just crewai) because
+# multiagent_crew.py reuses retrieval_qdrant/rerank_gemini/guardrails from
+# the main app, and app/main.py's /query/multiagent endpoint needs FastAPI
+# too if you want to run the full server from this venv.
+
+crewai>=1.15.0
+langchain-text-splitters>=0.3.0
+rank_bm25>=0.2.2
+sentence-transformers>=3.0.0
+numpy>=1.26.0
+fastapi>=0.115.0
+uvicorn>=0.30.0
+requests>=2.32.0
+pydantic>=2.8.0
+qdrant-client>=1.12.0
+redis>=5.0.0
+google-genai>=1.0.0
+presidio-analyzer>=2.2.0
+presidio-anonymizer>=2.2.0
+spacy>=3.7.0
+diskcache>=5.6.0
+python-dotenv>=1.0.0

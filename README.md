@@ -322,3 +322,26 @@ pip install -r requirements.txt
 ragas_venv\Scripts\activate
 pip install -r requirements-ragas.txt
 ```
+
+## Three virtual environments now, each for a real, specific reason
+
+| Venv | Python | Purpose |
+|---|---|---|
+| `rag_sys` | 3.14 | Main app -- FastAPI, Phase 1 (`/query`), Phase 2 (`/query/agentic`) |
+| `ragas_venv` | 3.12 | Evaluation harness only (`ragas_eval.py`) -- `ragas==0.2.15` has a genuine asyncio incompatibility under 3.14 |
+| `crewai_venv` | 3.12 | Phase 3 only (`multiagent_crew.py`, `/query/multiagent`) -- `crewai` explicitly declares `Requires-Python <3.14` in its own package metadata; every version from 0.95.0 through current excludes 3.14 outright |
+
+Three separate `requirements*.txt` files, one per venv -- `requirements.txt`
+(rag_sys), `requirements-ragas.txt` (ragas_venv), `requirements-crewai.txt`
+(crewai_venv). Never run `pip install -r requirements.txt` (the base one)
+inside `ragas_venv` or `crewai_venv`, and never add `ragas` or `crewai`
+back into the base `requirements.txt` -- both will silently resolve to
+broken/ancient versions on Python 3.14 rather than give a clear error.
+
+To (re)create `crewai_venv` from scratch:
+```powershell
+py -3.12 -m venv crewai_venv
+crewai_venv\Scripts\activate
+pip install -r requirements-crewai.txt
+python -m spacy download en_core_web_sm
+```

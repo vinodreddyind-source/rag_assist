@@ -121,6 +121,11 @@ class AgenticQueryResponse(BaseModel):
     route_history: list[str]
 
 
+class MultiAgentQueryResponse(BaseModel):
+    query: str
+    answer: str
+
+
 @app.post("/query", response_model=QueryResponse)
 async def query_endpoint(payload: QueryRequest):
     if check_injection(payload.query):
@@ -189,6 +194,23 @@ async def agentic_query_endpoint(payload: QueryRequest):
         relevance_score=result["relevance_score"],
         route_history=result["route_history"],
     )
+
+
+@app.post("/query/multiagent", response_model=MultiAgentQueryResponse)
+async def multiagent_query_endpoint(payload: QueryRequest):
+    """Phase 3 -- genuinely different from /query/agentic, not a renamed
+    version of it. Three specialist agents (one per product), coordinated
+    by a manager that decides delegation -- multiple agent identities,
+    not one self-correcting pipeline. Directly comparable to the other two
+    endpoints on the same corpus."""
+    from multiagent_crew import run_multiagent_query
+
+    try:
+        result = run_multiagent_query(payload.query)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return MultiAgentQueryResponse(query=payload.query, answer=result["answer"])
 
 
 @app.get("/health")
